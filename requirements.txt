@@ -1,0 +1,5 @@
+nemo_toolkit[asr]
+openai
+tkinter
+ffmpeg-python
+cuda-python>=12.3
