@@ -5,6 +5,7 @@ from datetime import datetime
 import nemo.collections.asr as nemo_asr
 import openai
 import glob
+import math
 
 # Helper: Convert audio to wav if needed
 def convert_to_wav(input_path):
@@ -18,11 +19,51 @@ def convert_to_wav(input_path):
     subprocess.run(cmd, check=True)
     return output_path
 
+def split_wav(input_wav, chunk_length_sec=600):
+    """Split a wav file into N-second chunks. Returns list of chunk file paths."""
+    import wave
+    import contextlib
+    chunk_paths = []
+    with contextlib.closing(wave.open(input_wav, 'rb')) as wf:
+        n_frames = wf.getnframes()
+        framerate = wf.getframerate()
+        duration = n_frames / float(framerate)
+        n_chunks = math.ceil(duration / chunk_length_sec)
+    for i in range(n_chunks):
+        start = i * chunk_length_sec
+        out_path = f"{input_wav}.chunk{i}.wav"
+        cmd = [
+            'ffmpeg', '-y', '-i', input_wav,
+            '-ss', str(start), '-t', str(chunk_length_sec),
+            '-acodec', 'copy', out_path
+        ]
+        subprocess.run(cmd, check=True)
+        chunk_paths.append(out_path)
+    return chunk_paths
+
 # Helper: Transcribe audio using Parakeet
 def transcribe_audio(audio_path):
+    # If file is long, split into chunks and transcribe each
+    import wave
+    import contextlib
+    chunk_length_sec = 600  # 10 minutes
+    with contextlib.closing(wave.open(audio_path, 'rb')) as wf:
+        n_frames = wf.getnframes()
+        framerate = wf.getframerate()
+        duration = n_frames / float(framerate)
+    if duration <= chunk_length_sec:
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name="nvidia/parakeet-tdt-0.6b-v2")
+        output = asr_model.transcribe([audio_path])
+        return output[0].text
+    # Split and transcribe each chunk
+    chunk_paths = split_wav(audio_path, chunk_length_sec)
     asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name="nvidia/parakeet-tdt-0.6b-v2")
-    output = asr_model.transcribe([audio_path])
-    return output[0].text
+    texts = []
+    for chunk in chunk_paths:
+        output = asr_model.transcribe([chunk])
+        texts.append(output[0].text)
+        os.remove(chunk)
+    return '\n'.join(texts)
 
 # Helper: Generate notes using OpenAI
 def generate_notes(transcription, api_key):
@@ -30,7 +71,7 @@ def generate_notes(transcription, api_key):
     response = openai.chat.completions.create(
         model="gpt-4.1",
         messages=[
-            {"role": "system", "content": "You are an expert in taking notes from audio transcriptions. I need you to create notes from the following transcription. Do not use any markdown, just stick to plain text."},
+            {"role": "system", "content": "You are an expert in taking notes from audio transcriptions. I need you to create notes from the following transcription. Do not use any markdown, just stick to plain text. Make sure to capture key points and action items from the meeting transcription. Change Zane to Zain."},
             {"role": "user", "content": transcription}
         ]
     )
@@ -41,32 +82,47 @@ PROCESSING_FOLDER = os.path.join(os.path.dirname(__file__), "processing")
 def process_all_in_folder(input_folder, api_key):
     audio_files = [f for f in os.listdir(input_folder) if f.lower().endswith((
         '.wav', '.flac', '.mp4a', '.mp3', '.ogg', '.m4a', '.aac', '.wma', '.opus', '.mp4'))]
+    processed_any = False
     for filename in audio_files:
-        title, ext = os.path.splitext(filename)
-        # Count how many files contain the title in their name
-        title_count = sum(1 for f in os.listdir(input_folder) if title in f)
-        if title_count > 1:
-            print(f"Skipping (multiple files with title present): {filename}")
-            continue
-        # Also skip .converted.wav files (never process them directly)
+        # Never process .converted.wav directly
         if filename.endswith('.converted.wav'):
+            continue
+        title, ext = os.path.splitext(filename)
+        # Find all output files for this title
+        trans_files = [f for f in os.listdir(input_folder) if f.startswith(title + '_') and '-transcription.txt' in f]
+        notes_files = [f for f in os.listdir(input_folder) if f.startswith(title + '_') and '-notes.txt' in f]
+        need_trans = not trans_files
+        need_notes = not notes_files
+        if not (need_trans or need_notes):
+            # Both outputs exist, skip
             continue
         dt = datetime.now().strftime("%Y%m%d-%H%M%S")
         base = f"{title}_{dt}"
         try:
             print(f"Processing: {filename}")
             wav_path = convert_to_wav(os.path.join(input_folder, filename))
-            transcription = transcribe_audio(wav_path)
-            trans_file = os.path.join(input_folder, f"{base}-transcription.txt")
-            with open(trans_file, "w", encoding="utf-8") as f:
-                f.write(transcription)
-            notes = generate_notes(transcription, api_key)
-            notes_file = os.path.join(input_folder, f"{base}-notes.txt")
-            with open(notes_file, "w", encoding="utf-8") as f:
-                f.write(notes)
-            print(f"Done: {filename}\n  -> {trans_file}\n  -> {notes_file}")
+            transcription = None
+            if need_trans or need_notes:
+                transcription = transcribe_audio(wav_path)
+            if need_trans:
+                trans_file = os.path.join(input_folder, f"{base}-transcription.txt")
+                with open(trans_file, "w", encoding="utf-8") as f:
+                    f.write(transcription)
+                print(f"  -> {trans_file}")
+            if need_notes:
+                if transcription is None:
+                    # Should not happen, but just in case
+                    with open(trans_files[0], "r", encoding="utf-8") as f:
+                        transcription = f.read()
+                notes = generate_notes(transcription, api_key)
+                notes_file = os.path.join(input_folder, f"{base}-notes.txt")
+                with open(notes_file, "w", encoding="utf-8") as f:
+                    f.write(notes)
+                print(f"  -> {notes_file}")
+            processed_any = True
         except Exception as e:
             print(f"Error processing {filename}: {e}")
+    return processed_any
 
 if __name__ == "__main__":
     api_key = os.getenv("OPENAI_API_KEY", "")
@@ -75,4 +131,9 @@ if __name__ == "__main__":
         sys.exit(1)
     if not os.path.exists(PROCESSING_FOLDER):
         os.makedirs(PROCESSING_FOLDER)
-    process_all_in_folder(PROCESSING_FOLDER, api_key)
+    # Loop until no more files are processed
+    while True:
+        processed = process_all_in_folder(PROCESSING_FOLDER, api_key)
+        if not processed:
+            print("No more new files to process. Exiting.")
+            break
