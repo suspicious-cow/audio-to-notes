@@ -1,0 +1,4 @@
+# Ignore all files in the processing folder
+processing/*
+# But do not ignore the folder itself
+!processing/

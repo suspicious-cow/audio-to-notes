@@ -1,9 +1,7 @@
 import os
 import sys
-import tkinter as tk
-from tkinter import filedialog, messagebox
-from datetime import datetime
 import subprocess
+from datetime import datetime
 import nemo.collections.asr as nemo_asr
 import openai
 
@@ -37,72 +35,36 @@ def generate_notes(transcription, api_key):
     )
     return response.choices[0].message.content.strip()
 
-# Main App
-class AudioToNotesApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Audio to Notes")
-        self.audio_path = None
-        self.api_key = os.getenv("OPENAI_API_KEY", "")
+PROCESSING_FOLDER = os.path.join(os.path.dirname(__file__), "processing")
 
-        tk.Label(root, text="Title:").grid(row=0, column=0, sticky="e")
-        self.title_entry = tk.Entry(root, width=40)
-        self.title_entry.grid(row=0, column=1, padx=5, pady=5)
-
-        tk.Button(root, text="Select Audio File", command=self.select_file).grid(row=1, column=0, columnspan=2, pady=5)
-        self.file_label = tk.Label(root, text="No file selected.")
-        self.file_label.grid(row=2, column=0, columnspan=2)
-
-        tk.Label(root, text="OpenAI API Key:").grid(row=3, column=0, sticky="e")
-        self.api_entry = tk.Entry(root, width=40, show="*")
-        self.api_entry.insert(0, self.api_key)
-        self.api_entry.grid(row=3, column=1, padx=5, pady=5)
-
-        tk.Button(root, text="Transcribe & Generate Notes", command=self.process).grid(row=4, column=0, columnspan=2, pady=10)
-
-    def select_file(self):
-        path = filedialog.askopenfilename(filetypes=[
-            ("Audio Files", "*.wav *.flac *.mp4a *.mp3 *.ogg *.m4a *.aac *.wma *.opus"),
-            ("All Files", "*.*")
-        ])
-        if path:
-            self.audio_path = path
-            self.file_label.config(text=os.path.basename(path))
-
-    def process(self):
-        title = self.title_entry.get().strip()
-        if not title:
-            messagebox.showerror("Error", "Please enter a title.")
-            return
-        if not self.audio_path:
-            messagebox.showerror("Error", "Please select an audio file.")
-            return
-        api_key = self.api_entry.get().strip()
-        if not api_key:
-            messagebox.showerror("Error", "Please enter your OpenAI API key.")
-            return
-        dt = datetime.now().strftime("%Y%m%d-%H%M%S")
-        base = f"{title}_{dt}"
-        try:
-            messagebox.showinfo(
-                "Transcribing",
-                "Transcription in progress. The progress bar in the terminal may not update, but the app is still working. Please wait until the process completes."
-            )
-            wav_path = convert_to_wav(self.audio_path)
-            transcription = transcribe_audio(wav_path)
-            trans_file = f"{base}-transcription.txt"
-            with open(trans_file, "w", encoding="utf-8") as f:
-                f.write(transcription)
-            notes = generate_notes(transcription, api_key)
-            notes_file = f"{base}-notes.txt"
-            with open(notes_file, "w", encoding="utf-8") as f:
-                f.write(notes)
-            messagebox.showinfo("Success", f"Transcription and notes saved as:\n{trans_file}\n{notes_file}")
-            self.root.quit()  # Close the GUI after completion
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+def process_all_in_folder(input_folder, api_key):
+    for filename in os.listdir(input_folder):
+        if filename.lower().endswith((
+            '.wav', '.flac', '.mp4a', '.mp3', '.ogg', '.m4a', '.aac', '.wma', '.opus', '.mp4')):
+            audio_path = os.path.join(input_folder, filename)
+            title, _ = os.path.splitext(filename)
+            dt = datetime.now().strftime("%Y%m%d-%H%M%S")
+            base = f"{title}_{dt}"
+            try:
+                print(f"Processing: {filename}")
+                wav_path = convert_to_wav(audio_path)
+                transcription = transcribe_audio(wav_path)
+                trans_file = os.path.join(input_folder, f"{base}-transcription.txt")
+                with open(trans_file, "w", encoding="utf-8") as f:
+                    f.write(transcription)
+                notes = generate_notes(transcription, api_key)
+                notes_file = os.path.join(input_folder, f"{base}-notes.txt")
+                with open(notes_file, "w", encoding="utf-8") as f:
+                    f.write(notes)
+                print(f"Done: {filename}\n  -> {trans_file}\n  -> {notes_file}")
+            except Exception as e:
+                print(f"Error processing {filename}: {e}")
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = AudioToNotesApp(root)
-    root.mainloop()
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if not api_key:
+        print("Error: OpenAI API key required. Set OPENAI_API_KEY.")
+        sys.exit(1)
+    if not os.path.exists(PROCESSING_FOLDER):
+        os.makedirs(PROCESSING_FOLDER)
+    process_all_in_folder(PROCESSING_FOLDER, api_key)
