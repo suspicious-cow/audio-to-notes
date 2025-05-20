@@ -4,6 +4,7 @@ import subprocess
 from datetime import datetime
 import nemo.collections.asr as nemo_asr
 import openai
+import glob
 
 # Helper: Convert audio to wav if needed
 def convert_to_wav(input_path):
@@ -29,7 +30,7 @@ def generate_notes(transcription, api_key):
     response = openai.chat.completions.create(
         model="gpt-4.1",
         messages=[
-            {"role": "system", "content": "Create notes from this transcription."},
+            {"role": "system", "content": "You are an expert in taking notes from audio transcriptions. I need you to create notes from the following transcription. Do not use any markdown, just stick to plain text."},
             {"role": "user", "content": transcription}
         ]
     )
@@ -38,27 +39,34 @@ def generate_notes(transcription, api_key):
 PROCESSING_FOLDER = os.path.join(os.path.dirname(__file__), "processing")
 
 def process_all_in_folder(input_folder, api_key):
-    for filename in os.listdir(input_folder):
-        if filename.lower().endswith((
-            '.wav', '.flac', '.mp4a', '.mp3', '.ogg', '.m4a', '.aac', '.wma', '.opus', '.mp4')):
-            audio_path = os.path.join(input_folder, filename)
-            title, _ = os.path.splitext(filename)
-            dt = datetime.now().strftime("%Y%m%d-%H%M%S")
-            base = f"{title}_{dt}"
-            try:
-                print(f"Processing: {filename}")
-                wav_path = convert_to_wav(audio_path)
-                transcription = transcribe_audio(wav_path)
-                trans_file = os.path.join(input_folder, f"{base}-transcription.txt")
-                with open(trans_file, "w", encoding="utf-8") as f:
-                    f.write(transcription)
-                notes = generate_notes(transcription, api_key)
-                notes_file = os.path.join(input_folder, f"{base}-notes.txt")
-                with open(notes_file, "w", encoding="utf-8") as f:
-                    f.write(notes)
-                print(f"Done: {filename}\n  -> {trans_file}\n  -> {notes_file}")
-            except Exception as e:
-                print(f"Error processing {filename}: {e}")
+    audio_files = [f for f in os.listdir(input_folder) if f.lower().endswith((
+        '.wav', '.flac', '.mp4a', '.mp3', '.ogg', '.m4a', '.aac', '.wma', '.opus', '.mp4'))]
+    for filename in audio_files:
+        title, ext = os.path.splitext(filename)
+        # Count how many files contain the title in their name
+        title_count = sum(1 for f in os.listdir(input_folder) if title in f)
+        if title_count > 1:
+            print(f"Skipping (multiple files with title present): {filename}")
+            continue
+        # Also skip .converted.wav files (never process them directly)
+        if filename.endswith('.converted.wav'):
+            continue
+        dt = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base = f"{title}_{dt}"
+        try:
+            print(f"Processing: {filename}")
+            wav_path = convert_to_wav(os.path.join(input_folder, filename))
+            transcription = transcribe_audio(wav_path)
+            trans_file = os.path.join(input_folder, f"{base}-transcription.txt")
+            with open(trans_file, "w", encoding="utf-8") as f:
+                f.write(transcription)
+            notes = generate_notes(transcription, api_key)
+            notes_file = os.path.join(input_folder, f"{base}-notes.txt")
+            with open(notes_file, "w", encoding="utf-8") as f:
+                f.write(notes)
+            print(f"Done: {filename}\n  -> {trans_file}\n  -> {notes_file}")
+        except Exception as e:
+            print(f"Error processing {filename}: {e}")
 
 if __name__ == "__main__":
     api_key = os.getenv("OPENAI_API_KEY", "")
