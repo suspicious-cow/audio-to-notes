@@ -71,7 +71,7 @@ def generate_notes(transcription, api_key):
     response = openai.chat.completions.create(
         model="gpt-4.1",
         messages=[
-            {"role": "system", "content": "You are an expert in taking notes from audio transcriptions. I need you to create notes from the following transcription. Do not use any markdown, just stick to plain text. Make sure to capture key points and action items from the meeting transcription. Change Zane to Zain."},
+            {"role": "system", "content": "You are an expert in taking notes from audio transcriptions. I need you to create notes from the following transcription. Do not use any markdown, just stick to plain text. Make sure to capture key points and action items from the meeting transcription. Change all instances of Zane to Zain."},
             {"role": "user", "content": transcription}
         ]
     )
