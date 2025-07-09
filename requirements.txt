@@ -1,5 +1,6 @@
-nemo_toolkit[asr]
-openai
-tkinter
-ffmpeg-python
-cuda-python>=12.3
+# Audio-to-Notes Application Requirements
+# Core dependencies for OpenAI Whisper transcription and GPT note generation
+openai==1.93.2
+openai-whisper
+
+# Note: ffmpeg command-line tool is also required but installed separately via conda/system package manager

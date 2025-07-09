@@ -1,25 +1,23 @@
 # Audio-to-Notes
 
-Audio-to-Notes is a Python application that streamlines the process of transcribing audio files and generating concise notes using state-of-the-art AI models. It features a simple graphical user interface (GUI) for easy file selection and title entry, and leverages NVIDIA NeMo's Parakeet for transcription and OpenAI's GPT-4.1 for note generation.
+Audio-to-Notes is a Python application that streamlines the process of transcribing audio files and generating concise notes using state-of-the-art AI models. It features a simple command-line interface for processing audio files, and leverages OpenAI Whisper for transcription and OpenAI's GPT-4o for note generation.
 
 ---
 
 ## Features
 - **Audio File Support:** Accepts a wide range of audio formats (e.g., mp4a, wav, mp3, flac, m4a, ogg, etc.).
-- **User-Friendly GUI:** Simple interface for selecting audio files and entering a custom title.
-- **Automatic Transcription:** Uses NVIDIA Parakeet (via NeMo Toolkit) for accurate speech-to-text transcription.
-- **AI-Powered Notes:** Summarizes transcriptions into clear, concise notes using OpenAI's GPT-4.1 API.
-- **Organized Output:** Saves both transcription and notes with filenames containing the user title, current date/time, and a descriptive suffix.
-- **Robust File Handling:** Handles audio conversion (via ffmpeg) to ensure compatibility with the transcription model.
+- **Automatic Processing:** Monitors a folder for new audio files and processes them automatically.
+- **Automatic Transcription:** Uses OpenAI Whisper for accurate speech-to-text transcription.
+- **AI-Powered Notes:** Summarizes transcriptions into clear, concise notes using OpenAI's GPT-4o API.
+- **Organized Output:** Saves both transcription and notes with filenames containing the original title, current date/time, and a descriptive suffix.
+- **Robust File Handling:** Handles audio conversion (via ffmpeg) and long file chunking for optimal processing.
 
 ---
 
 ## Requirements
 - Python 3.8+
-- NVIDIA GPU with CUDA drivers (for NeMo/Parakeet ASR)
-- [nemo_toolkit[asr]](https://github.com/NVIDIA/NeMo) (for Parakeet ASR)
-- [openai](https://pypi.org/project/openai/) Python package
-- [tkinter](https://docs.python.org/3/library/tkinter.html) (for GUI)
+- [openai-whisper](https://github.com/openai/whisper) (for speech-to-text transcription)
+- [openai](https://pypi.org/project/openai/) Python package (for GPT-4o note generation)
 - [ffmpeg](https://ffmpeg.org/) (system package, for audio conversion)
 - [ffmpeg-python](https://github.com/kkroening/ffmpeg-python) (Python wrapper for ffmpeg)
 
@@ -37,7 +35,6 @@ Audio-to-Notes is a Python application that streamlines the process of transcrib
    pip install -r requirements.txt
    ```
 3. **Install system dependencies:**
-   - Ensure you have an NVIDIA GPU and CUDA drivers installed.
    - Install ffmpeg:
      ```bash
      sudo apt-get update && sudo apt-get install ffmpeg
@@ -63,9 +60,9 @@ Audio-to-Notes is a Python application that streamlines the process of transcrib
    - Click the button to start processing.
    - The app will:
      - Convert the audio to a compatible format if needed.
-     - Transcribe the audio using NeMo Parakeet.
+     - Transcribe the audio using OpenAI Whisper.
      - Save the transcription as `<title>-<datetime>-transcription.txt`.
-     - Generate notes from the transcription using OpenAI GPT-4.1.
+     - Generate notes from the transcription using OpenAI GPT-4o.
      - Save the notes as `<title>-<datetime>-notes.txt`.
    - All output files are saved in the current working directory.
 
@@ -80,7 +77,6 @@ Suppose you have an audio file `meeting.m4a` and want to generate notes titled "
 ---
 
 ## Troubleshooting
-- **CUDA/Driver Issues:** Ensure your NVIDIA drivers and CUDA are properly installed and compatible with your GPU.
 - **ffmpeg Not Found:** Install ffmpeg using your system package manager (see above).
 - **OpenAI API Errors:** Make sure your API key is valid and has sufficient quota.
 - **tkinter Not Installed:** On some Linux systems, install with `sudo apt-get install python3-tk`.
@@ -88,14 +84,11 @@ Suppose you have an audio file `meeting.m4a` and want to generate notes titled "
 ---
 
 ## License
-- Parakeet model: CC-BY-4.0
-- This app: MIT License (or specify your own)
-
----
+- This app: MIT License
 
 ## Acknowledgments
-- [NVIDIA NeMo Toolkit](https://github.com/NVIDIA/NeMo)
-- [OpenAI GPT-4.1](https://platform.openai.com/docs/models/gpt-4)
+- [OpenAI Whisper](https://github.com/openai/whisper)
+- [OpenAI GPT-4o](https://platform.openai.com/docs/models/gpt-4o)
 - [ffmpeg](https://ffmpeg.org/)
 
 ---

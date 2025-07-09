@@ -2,7 +2,7 @@ import os
 import sys
 import subprocess
 from datetime import datetime
-import nemo.collections.asr as nemo_asr
+import whisper
 import openai
 import glob
 import math
@@ -41,41 +41,56 @@ def split_wav(input_wav, chunk_length_sec=600):
         chunk_paths.append(out_path)
     return chunk_paths
 
-# Helper: Transcribe audio using Parakeet
+# Helper: Transcribe audio using OpenAI Whisper
 def transcribe_audio(audio_path):
+    # Load Whisper model (using 'base' for good balance of speed/accuracy)
+    print("Loading Whisper model...")
+    model = whisper.load_model("base")
+    
     # If file is long, split into chunks and transcribe each
     import wave
     import contextlib
     chunk_length_sec = 600  # 10 minutes
-    with contextlib.closing(wave.open(audio_path, 'rb')) as wf:
-        n_frames = wf.getnframes()
-        framerate = wf.getframerate()
-        duration = n_frames / float(framerate)
+    
+    try:
+        with contextlib.closing(wave.open(audio_path, 'rb')) as wf:
+            n_frames = wf.getnframes()
+            framerate = wf.getframerate()
+            duration = n_frames / float(framerate)
+    except Exception:
+        # If wave can't read it, just try transcribing directly
+        print("Transcribing audio file...")
+        result = model.transcribe(audio_path)
+        return result["text"]
+    
     if duration <= chunk_length_sec:
-        asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name="nvidia/parakeet-tdt-0.6b-v2")
-        output = asr_model.transcribe([audio_path])
-        return output[0].text
+        print("Transcribing audio file...")
+        result = model.transcribe(audio_path)
+        return result["text"]
+    
     # Split and transcribe each chunk
+    print(f"File is long ({duration:.1f}s), splitting into chunks...")
     chunk_paths = split_wav(audio_path, chunk_length_sec)
-    asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name="nvidia/parakeet-tdt-0.6b-v2")
     texts = []
-    for chunk in chunk_paths:
-        output = asr_model.transcribe([chunk])
-        texts.append(output[0].text)
+    for i, chunk in enumerate(chunk_paths):
+        print(f"Transcribing chunk {i+1}/{len(chunk_paths)}...")
+        result = model.transcribe(chunk)
+        texts.append(result["text"])
         os.remove(chunk)
     return '\n'.join(texts)
 
 # Helper: Generate notes using OpenAI
 def generate_notes(transcription, api_key):
-    openai.api_key = api_key
-    response = openai.chat.completions.create(
-        model="gpt-4.1",
+    client = openai.OpenAI(api_key=api_key)
+    response = client.chat.completions.create(
+        model="gpt-4o",  # Updated to use gpt-4o
         messages=[
             {"role": "system", "content": "You are an expert in taking notes from audio transcriptions. I need you to create notes from the following transcription. Do not use any markdown, just stick to plain text. Make sure to capture key points and action items from the meeting transcription. Change all instances of Zane to Zain."},
             {"role": "user", "content": transcription}
         ]
     )
-    return response.choices[0].message.content.strip()
+    content = response.choices[0].message.content
+    return content if content else "No notes generated."
 
 PROCESSING_FOLDER = os.path.join(os.path.dirname(__file__), "processing")
 
@@ -107,7 +122,7 @@ def process_all_in_folder(input_folder, api_key):
             if need_trans:
                 trans_file = os.path.join(input_folder, f"{base}-transcription.txt")
                 with open(trans_file, "w", encoding="utf-8") as f:
-                    f.write(transcription)
+                    f.write(str(transcription))
                 print(f"  -> {trans_file}")
             if need_notes:
                 if transcription is None:

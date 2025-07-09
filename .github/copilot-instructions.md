@@ -3,9 +3,9 @@
 This project is a Python app that:
 - Accepts any sound file (mp4a, wav, etc.)
 - Lets the user enter a title in a textbox
-- Uses Nvidia Parakeet (via NeMo) to transcribe audio
+- Uses OpenAI Whisper to transcribe audio
 - Saves the transcription as title, datetime, and '-transcription'
-- Uses OpenAI API (gpt-4.1) to create notes from the transcription
+- Uses OpenAI API (gpt-4o) to create notes from the transcription
 - Saves notes as title, datetime, and '-notes'
 - Has a simple GUI for file selection and title entry
 
