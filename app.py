@@ -83,7 +83,7 @@ def transcribe_audio(audio_path):
 def generate_notes(transcription, api_key):
     client = openai.OpenAI(api_key=api_key)
     response = client.chat.completions.create(
-        model="gpt-5",  # Updated to use gpt-4o
+        model="gpt-5",  
         messages=[
             {"role": "system", "content": "You are an expert in taking notes from audio transcriptions. I need you to create notes from the following transcription. Do not use any markdown, just stick to plain text. Make sure to capture key points and action items from the meeting transcription. Change all instances of Zane to Zain."},
             {"role": "user", "content": transcription}
