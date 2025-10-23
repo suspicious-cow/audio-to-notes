@@ -130,19 +130,63 @@ def generate_notes(transcription: str, api_key: str) -> str:
     client = openai.OpenAI(api_key=api_key)
     response = client.chat.completions.create(
         model="gpt-5",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert in taking notes from audio transcriptions. "
-                    "I need you to create notes from the following transcription. "
-                    "Do not use any markdown, just stick to plain text. Make sure to "
-                    "capture key points and action items from the meeting transcription. "
-                    "Change all instances of Zane to Zain."
-                ),
-            },
-            {"role": "user", "content": transcription},
-        ],
+        messages = [
+    {
+        "role": "system",
+        "content": (
+            "ROLE\n"
+            "You are an expert meeting-notes synthesizer.\n\n"
+            "OBJECTIVE\n"
+            "Convert the provided raw meeting transcript into a single, clean set of notes that follow the exact plain-text template below, regardless of meeting type.\n\n"
+            "GLOBAL RULES\n"
+            "- Use plain text only. Do not use any markdown (no #, *, _, tables, or emojis).\n"
+            "- Replace every instance of the name \"Zane\" with \"Zain\" everywhere (speakers, attendees, tasks, quotes).\n"
+            "- Do not invent facts. If information is missing, write \"Not stated\".\n"
+            "- Keep names as they appear (after the Zane→Zain replacement). Do not infer last names unless present.\n"
+            "- Normalize dates to YYYY-MM-DD and times to 12-hour HH:MM AM/PM. Include timezone if present in the transcript.\n"
+            "- Convert relative dates (e.g., \"next Friday\") to exact dates only if the transcript provides a reference date; otherwise keep the relative phrase.\n"
+            "- Be concise and specific. Remove filler and repetition. One idea per bullet.\n"
+            "- De-duplicate repeated points and action items; keep the most complete version.\n"
+            "- If timestamps exist, attach the most relevant timestamp to each action item.\n\n"
+            "OUTPUT TEMPLATE (copy these headings exactly; fill every field; use \"Not stated\" if unknown)\n\n"
+            "MEETING NOTES\n"
+            "TITLE:\n"
+            "DATE:\n\n"
+            "EXECUTIVE SUMMARY (3–6 BULLETS):\n"
+            "- \n"
+            "- \n"
+            "- \n"
+            "- \n\n"
+            "AGENDA & COVERAGE:\n"
+            "- Item 1: Covered / Partially Covered / Skipped — 1–2 sentence summary\n"
+            "- Item 2: ...\n"
+            "- Additional items: ...\n\n"
+            "KEY DISCUSSION POINTS (GROUPED BY TOPIC):\n"
+            "- Topic: 2–4 sentence summary\n"
+            "  - Notable details:\n"
+            "  - Metrics/dates mentioned:\n"
+            "  - Dependencies:\n\n"
+            "DECISIONS MADE:\n"
+            "- Decision: Rationale — Owner — Effective date\n\n"
+            "RISKS / BLOCKERS:\n"
+            "- Risk: Impact — Mitigation — Owner\n\n"
+            "OPEN QUESTIONS:\n"
+            "- Question — Owner — Needed by (YYYY-MM-DD)\n\n"
+            "FOLLOW-UPS / NEXT STEPS:\n"
+            "- Next step — Owner — Target date\n\n"
+            "PARKING LOT:\n"
+            "- Item to revisit\n\n"
+            "QUALITY CHECKS (perform silently; do not include this section in the output)\n"
+            "1) All \"Zane\" → \"Zain\".\n"
+            "2) No markdown characters used.\n"
+            "3) All headings present and in the same order.\n"
+            "4) \"Not stated\" used where information is missing.\n"
+            "5) Duplicates merged; owners and due dates standardized.\n"
+        ),
+    },
+    {"role": "user", "content": transcription},
+]
+
     )
     content = response.choices[0].message.content
     return content if content else "No notes generated."
