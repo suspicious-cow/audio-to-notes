@@ -2,3 +2,5 @@
 processing/*
 # But do not ignore the folder itself
 !processing/
+__pycache__/
+*.pyc
