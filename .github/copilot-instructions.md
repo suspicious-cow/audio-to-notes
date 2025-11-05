@@ -10,3 +10,5 @@ This project is a Python app that:
 - Has a simple GUI for file selection and title entry
 
 Ensure code is modular, robust, and user-friendly. Use best practices for file handling and API calls.
+
+Operational note: when ad-hoc Python snippets are required, create a temporary script whose filename begins with double underscores (e.g., `__temp_script.py`) instead of using heredoc commands like `python - <<'PY'`.

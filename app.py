@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import importlib
 import math
 import os
 import shutil
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 import openai
-import whisper
+import torch
 
 SUPPORTED_EXTENSIONS: tuple[str, ...] = (
     ".wav",
@@ -27,7 +28,80 @@ SUPPORTED_EXTENSIONS: tuple[str, ...] = (
 )
 
 PROCESSING_FOLDER = Path(__file__).resolve().parent / "processing"
-DEFAULT_CHUNK_LENGTH_SEC = 600  # 10 minutes
+DEFAULT_CHUNK_LENGTH_SEC = 60  # Canary-Qwen is optimized for ~40s inputs
+
+
+class CanaryTranscriber:
+    """Wrapper around NVIDIA Canary-Qwen SALM for chunked transcription."""
+
+    def __init__(
+        self,
+        *,
+        model_name: str = "nvidia/canary-qwen-2.5b",
+        max_new_tokens: int = 512,
+        device: Optional[str] = None,
+    ) -> None:
+        self.device = device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.max_new_tokens = max_new_tokens
+        print(f"Loading Canary-Qwen model on {self.device}...")
+        fsdp_module = importlib.import_module("torch.distributed.fsdp")
+        if not hasattr(fsdp_module, "fully_shard"):
+
+            def _passthrough_fully_shard(target=None, *_, **__):
+                return target
+
+            fsdp_module.fully_shard = _passthrough_fully_shard  # type: ignore[attr-defined]
+        dtensor_module = importlib.import_module("torch.distributed.tensor")
+        if not hasattr(dtensor_module, "Replicate"):
+
+            class _Replicate:
+                def __repr__(self) -> str:  # pragma: no cover - trivial
+                    return "Replicate()"
+
+            dtensor_module.Replicate = _Replicate  # type: ignore[attr-defined]
+        if not hasattr(dtensor_module, "Shard"):
+
+            class _Shard:
+                def __init__(self, dim: int) -> None:
+                    self.dim = dim
+
+                def __repr__(self) -> str:  # pragma: no cover - trivial
+                    return f"Shard(dim={self.dim})"
+
+            dtensor_module.Shard = _Shard  # type: ignore[attr-defined]
+        if hasattr(dtensor_module, "__all__"):
+            for _symbol in ("Replicate", "Shard"):
+                if _symbol not in dtensor_module.__all__:
+                    dtensor_module.__all__.append(_symbol)
+        salm_module = importlib.import_module("nemo.collections.speechlm2.models.salm")
+        salm_cls = getattr(salm_module, "SALM")
+        self.model = salm_cls.from_pretrained(
+            model_name,
+            map_location=self.device,
+            model_id=model_name,
+            proxies=None,
+            resume_download=False,
+        )
+        self.model.to(self.device)
+        self.model.eval()
+        self.prompt_template = "Transcribe the following: {}"
+
+    def transcribe(self, audio_path: Path) -> str:
+        prompt = self.prompt_template.format(self.model.audio_locator_tag)
+        prompts = [[{"role": "user", "content": prompt, "audio": [str(audio_path)]}]]
+        with torch.inference_mode():
+            answer_ids = self.model.generate(
+                prompts=prompts,
+                max_new_tokens=self.max_new_tokens,
+            )
+        transcript = self.model.tokenizer.ids_to_text(answer_ids[0].cpu())
+        return transcript.strip()
+
+    def close(self) -> None:
+        if hasattr(self, "model"):
+            del self.model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
 
 def convert_to_wav(input_path: Path) -> tuple[Path, bool]:
@@ -97,21 +171,19 @@ def split_wav(input_wav: Path, chunk_length_sec: int = DEFAULT_CHUNK_LENGTH_SEC)
 def transcribe_audio(
     audio_path: Path,
     *,
-    model: whisper.Whisper,
+    transcriber: CanaryTranscriber,
     chunk_length_sec: int = DEFAULT_CHUNK_LENGTH_SEC,
 ) -> str:
-    """Transcribe audio using Whisper, chunking longer files automatically."""
+    """Transcribe audio using Canary-Qwen, chunking longer files automatically."""
     try:
         duration = get_wav_duration_seconds(audio_path)
     except Exception:
         print("Transcribing audio file...")
-        result = model.transcribe(str(audio_path))
-        return result["text"]
+        return transcriber.transcribe(audio_path)
 
     if duration <= chunk_length_sec:
         print("Transcribing audio file...")
-        result = model.transcribe(str(audio_path))
-        return result["text"]
+        return transcriber.transcribe(audio_path)
 
     print(f"File is long ({duration:.1f}s), splitting into chunks...")
     chunk_paths, temp_dir = split_wav(audio_path, chunk_length_sec)
@@ -119,8 +191,7 @@ def transcribe_audio(
     try:
         for idx, chunk in enumerate(chunk_paths, start=1):
             print(f"Transcribing chunk {idx}/{len(chunk_paths)}...")
-            result = model.transcribe(str(chunk))
-            texts.append(result["text"])
+            texts.append(transcriber.transcribe(chunk))
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
     return "\n".join(texts)
@@ -212,7 +283,7 @@ def process_file(
     *,
     chunk_length_sec: int = DEFAULT_CHUNK_LENGTH_SEC,
     skip_existing: bool = False,
-    model: Optional[whisper.Whisper] = None,
+    transcriber: Optional[CanaryTranscriber] = None,
 ) -> Optional[dict[str, Path]]:
     input_path = Path(input_path).expanduser().resolve()
     if not input_path.exists() or not input_path.is_file():
@@ -235,24 +306,22 @@ def process_file(
     print(f"Processing: {input_path}")
     wav_path, should_cleanup_wav = convert_to_wav(input_path)
 
-    close_model = False
-    if model is None:
-        print("Loading Whisper model...")
-        model = whisper.load_model("base")
-        close_model = True
+    close_transcriber = False
+    if transcriber is None:
+        transcriber = CanaryTranscriber()
+        close_transcriber = True
 
     try:
         transcription = transcribe_audio(
             wav_path,
-            model=model,
+            transcriber=transcriber,
             chunk_length_sec=chunk_length_sec,
         )
     finally:
         if should_cleanup_wav and wav_path.exists():
             wav_path.unlink()
-        if close_model:
-            # Ensure resources are freed when we created the model.
-            del model
+        if close_transcriber:
+            transcriber.close()
 
     with open(transcription_path, "w", encoding="utf-8") as f:
         f.write(transcription)
@@ -286,21 +355,24 @@ def process_all_in_folder(
         return False
 
     print(f"Found {len(audio_files)} file(s) to check in {input_folder}")
-    model = whisper.load_model("base")
+    transcriber = CanaryTranscriber()
     processed_any = False
-    for audio_file in audio_files:
-        try:
-            result = process_file(
-                audio_file,
-                api_key,
-                chunk_length_sec=chunk_length_sec,
-                skip_existing=skip_existing,
-                model=model,
-            )
-            if result is not None:
-                processed_any = True
-        except Exception as exc:
-            print(f"Error processing {audio_file.name}: {exc}")
+    try:
+        for audio_file in audio_files:
+            try:
+                result = process_file(
+                    audio_file,
+                    api_key,
+                    chunk_length_sec=chunk_length_sec,
+                    skip_existing=skip_existing,
+                    transcriber=transcriber,
+                )
+                if result is not None:
+                    processed_any = True
+            except Exception as exc:
+                print(f"Error processing {audio_file.name}: {exc}")
+    finally:
+        transcriber.close()
     return processed_any
 
 
@@ -325,7 +397,7 @@ def run_processing_loop(
 
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Transcribe audio files and generate notes using OpenAI Whisper and GPT.",
+        description="Transcribe audio files with NVIDIA Canary-Qwen and summarize notes with GPT.",
     )
     parser.add_argument(
         "target",
@@ -341,7 +413,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         "--chunk-length",
         type=int,
         default=DEFAULT_CHUNK_LENGTH_SEC,
-        help="Chunk length in seconds when splitting long audio (default: 600).",
+        help=f"Chunk length in seconds when splitting long audio (default: {DEFAULT_CHUNK_LENGTH_SEC}).",
     )
     parser.add_argument(
         "--no-skip-existing",
@@ -355,7 +427,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Continuously scan the processing folder until no new files are found (default action when no target is provided).",
     )
-    return parser.parse_args(argv)
+    return parser.parse_args(list(argv) if argv is not None else None)
 
 
 def cli_main(argv: Optional[Iterable[str]] = None) -> None:
