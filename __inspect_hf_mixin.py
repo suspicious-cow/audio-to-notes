@@ -6,6 +6,10 @@ parts_dir = env_root / "nemo" / "collections" / "speechlm2" / "parts"
 target = parts_dir / "hf_hub.py"
 print(f"Reading {target}")
 source = target.read_text(encoding="utf-8")
+first_lines = source.splitlines()[:20]
+print("First 20 lines preview:")
+for line in first_lines:
+    print(line)
 module = ast.parse(source)
 
 
@@ -34,6 +38,9 @@ class Visitor(ast.NodeVisitor):
                     print("_from_pretrained kwonly:", kwonly)
                     print("_from_pretrained defaults:", defaults)
                     print("_from_pretrained kw_defaults:", kw_defaults)
+                    segment = ast.get_source_segment(source, item)
+                    if segment:
+                        print("_from_pretrained source:\n" + segment)
         methods = [item.name for item in node.body if isinstance(item, ast.FunctionDef)]
         print("Methods:", methods)
 

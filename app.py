@@ -73,14 +73,94 @@ class CanaryTranscriber:
             for _symbol in ("Replicate", "Shard"):
                 if _symbol not in dtensor_module.__all__:
                     dtensor_module.__all__.append(_symbol)
+        # PyTorch 2.4 lacks the padding_side keyword that NeMo expects.
+        rnn_module = importlib.import_module("torch.nn.utils.rnn")
+        pad_sequence_fn = getattr(rnn_module, "pad_sequence")
+        import inspect
+
+        if "padding_side" not in inspect.signature(pad_sequence_fn).parameters:
+            original_pad_sequence = pad_sequence_fn
+
+            def _pad_sequence_with_side(
+                sequences,
+                batch_first: bool = False,
+                padding_value: float = 0.0,
+                padding_side: str = "right",
+            ):
+                if padding_side == "right":
+                    return original_pad_sequence(sequences, batch_first=batch_first, padding_value=padding_value)
+                if padding_side != "left":
+                    raise ValueError(f"Unsupported padding_side: {padding_side}")
+                if not sequences:
+                    return original_pad_sequence(sequences, batch_first=batch_first, padding_value=padding_value)
+
+                max_len = max(seq.size(0) for seq in sequences)
+                trailing_shape = sequences[0].shape[1:]
+                output_shape = (len(sequences), max_len, *trailing_shape) if batch_first else (max_len, len(sequences), *trailing_shape)
+                output = sequences[0].new_full(output_shape, padding_value)
+
+                if batch_first:
+                    for idx, seq in enumerate(sequences):
+                        length = seq.size(0)
+                        output[idx, max_len - length :] = seq
+                else:
+                    for idx, seq in enumerate(sequences):
+                        length = seq.size(0)
+                        output[max_len - length :, idx] = seq
+                return output
+
+            rnn_module.pad_sequence = _pad_sequence_with_side  # type: ignore[assignment]
         salm_module = importlib.import_module("nemo.collections.speechlm2.models.salm")
         salm_cls = getattr(salm_module, "SALM")
-        self.model = salm_cls.from_pretrained(
+        hf_parts_module = importlib.import_module("nemo.collections.speechlm2.parts.hf_hub")
+        omegaconf_module = importlib.import_module("omegaconf")
+        transformers_utils = importlib.import_module("transformers.utils")
+
+        cached_file_fn = getattr(transformers_utils, "cached_file")
+        omega_conf = getattr(omegaconf_module, "OmegaConf")
+        config_name = getattr(hf_parts_module, "CONFIG_NAME")
+
+        resolved_config = cached_file_fn(
             model_name,
-            map_location=self.device,
-            model_id=model_name,
+            config_name,
+            cache_dir=None,
+            force_download=False,
             proxies=None,
             resume_download=False,
+            local_files_only=False,
+            token=None,
+            revision=None,
+            _raise_exceptions_for_gated_repo=False,
+            _raise_exceptions_for_missing_entries=False,
+            _raise_exceptions_for_connection_errors=False,
+        )
+        if resolved_config is None:
+            raise RuntimeError(f"Missing {config_name} for {model_name}")
+
+        cfg_dict = omega_conf.to_container(omega_conf.load(resolved_config))
+        if not isinstance(cfg_dict, dict):
+            raise TypeError("Expected model config to deserialize to a dict")
+        cfg_dict["pretrained_weights"] = False
+
+        base_from_pretrained = None
+        for base in salm_cls.__mro__:
+            if base.__name__ == "PyTorchModelHubMixin":
+                base_from_pretrained = base._from_pretrained.__get__(salm_cls, salm_cls)
+                break
+        if base_from_pretrained is None:
+            raise RuntimeError("PyTorchModelHubMixin not found in SALM inheritance chain")
+
+        # Load weights via the vanilla PyTorchModelHubMixin to avoid extra kwargs that Nemo's mixin forwards.
+        self.model = base_from_pretrained(
+            model_id=model_name,
+            revision=None,
+            cache_dir=None,
+            force_download=False,
+            local_files_only=False,
+            token=None,
+            map_location=self.device,
+            strict=False,
+            cfg=cfg_dict,
         )
         self.model.to(self.device)
         self.model.eval()

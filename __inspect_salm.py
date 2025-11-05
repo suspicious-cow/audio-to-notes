@@ -15,29 +15,26 @@ module = ast.parse(source)
 
 class FuncVisitor(ast.NodeVisitor):
 	def visit_ClassDef(self, node: ast.ClassDef) -> None:
-		print(f"Found class {node.name}")
 		if node.name == "SALM":
+			print(f"Found class {node.name}")
 			bases = [ast.unparse(base) for base in node.bases]
 			print("Bases:", bases)
 			for item in node.body:
-				if isinstance(item, ast.FunctionDef) and item.name == "from_pretrained":
+				if isinstance(item, ast.FunctionDef) and item.name == "__init__":
 					args = [arg.arg for arg in item.args.args]
 					kwonly = [arg.arg for arg in item.args.kwonlyargs]
-					print("args:", args)
-					print("kwonly:", kwonly)
-					defaults = len(item.args.defaults)
+					defaults = [None if d is None else ast.unparse(d) for d in item.args.defaults]
 					kw_defaults = [None if d is None else ast.unparse(d) for d in item.args.kw_defaults]
-					print("kw_defaults:", kw_defaults)
+					print("__init__ args:", args)
+					print("__init__ kwonly:", kwonly)
+					print("__init__ defaults:", defaults)
+					print("__init__ kw_defaults:", kw_defaults)
+					segment = ast.get_source_segment(source, item)
+					if segment:
+						print("__init__ snippet:\n" + '\n'.join(segment.split('\n')[:80]))
 
 	def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-		if node.name == "from_pretrained":
-			print("Top-level from_pretrained found")
-		print(f"Function {node.name}")
-		args = [arg.arg for arg in node.args.args]
-		kwonly = [arg.arg for arg in node.args.kwonlyargs]
-		print("args:", args)
-		print("kwonly:", kwonly)
-		kw_defaults = [None if d is None else ast.unparse(d) for d in node.args.kw_defaults]
-		print("kw_defaults:", kw_defaults)
+		pass
+
 
 FuncVisitor().visit(module)
