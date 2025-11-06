@@ -28,7 +28,7 @@ SUPPORTED_EXTENSIONS: tuple[str, ...] = (
 )
 
 PROCESSING_FOLDER = Path(__file__).resolve().parent / "processing"
-DEFAULT_CHUNK_LENGTH_SEC = 60  # Canary-Qwen is optimized for ~40s inputs
+DEFAULT_CHUNK_LENGTH_SEC = 40  # Canary-Qwen performs best around 30–45s chunks
 
 
 class CanaryTranscriber:
