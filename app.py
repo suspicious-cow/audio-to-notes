@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import gc
 import importlib
 import math
 import os
@@ -180,8 +181,11 @@ class CanaryTranscriber:
     def close(self) -> None:
         if hasattr(self, "model"):
             del self.model
+            gc.collect()
             if torch.cuda.is_available():
+                torch.cuda.synchronize()
                 torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
 
 
 def convert_to_wav(input_path: Path) -> tuple[Path, bool]:
