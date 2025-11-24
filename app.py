@@ -284,7 +284,7 @@ def transcribe_audio(
 def generate_notes(transcription: str, api_key: str) -> str:
     client = openai.OpenAI(api_key=api_key)
     response = client.chat.completions.create(
-        model="gpt-5",
+        model="gpt-5.1",
         messages = [
     {
         "role": "system",
